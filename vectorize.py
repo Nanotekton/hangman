@@ -22,7 +22,7 @@ def smiles_to_fgp(smiles=None, mol=None):
         raise
 
 
-def vectorize_substrate_space(source='shared_file'):
+def vectorize_unique_substrates(source='shared_file'):
     if source=='shared_file':
         data, status = load_spreadsheet()
     else:
@@ -140,7 +140,7 @@ if __name__=='__main__':
     logger.addHandler(h)
 
     logger.info('start')
-    mida, bromide = vectorize_substrate_space()
+    mida, bromide = vectorize_unique_substrates()
     logger.info('vectorization done')
 
     mida_ranking, mida_counts = count_frequencies(mida[1])
