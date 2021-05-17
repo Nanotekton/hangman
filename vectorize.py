@@ -3,7 +3,9 @@ from rdkit.Chem import AllChem
 from loading import load_spreadsheet
 import logging
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import OneHotEncoder
+import json
 
 logger = logging.getLogger('vectorize_module')
 
@@ -25,9 +27,12 @@ def smiles_to_fgp(smiles=None, mol=None):
 def vectorize_unique_substrates(source='shared_file'):
     if source=='shared_file':
         data, status = load_spreadsheet()
-    else:
+    elif type(source).__name__=='str':
         status = 'loaded_from_local_file'
         data = pd.read_csv(source, sep=';')
+    else:
+        status = 'assumed source to be DataFrame'
+        data = source
     logger.info(status)
 
     mida_smiles = [x for x in data['boronate/boronic ester smiles'].unique() if type(x).__name__[:3]=='str']
@@ -55,8 +60,16 @@ def make_reagent_encoder(source='shared_file', df=None, cols=['ligand', 'solvent
         status = 'from_local_CSV'
         use_df = True
     elif '.json' == source[-5:]:
+        status = 'loaded_from_json'
         with open(source, 'r') as f:
             categories = json.load(f)
+            if type(categories).__name__=='dict':
+                category_names = list(categories.keys())
+                logger.info('category names: %s'%str(category_names))
+                assert set(category_names)==set(cols)
+                category_names.sort(key=lambda x: cols.index(x))
+                categories = [categories[x] for x in category_names]
+
     else:
         raise ValueError('unknown source of source format: %s'%source)
 
@@ -132,6 +145,89 @@ def fgps_to_freq_vec(fgp_list, cutoff=0, set_place_for_unk=False, ranking=None):
     return result, ranking
 
 
+def unfold_conditions(condition_space_list):
+    result = []
+    for dim in condition_space_list:
+        if result == []:
+            result = [[x] for x in dim]
+        else:
+            new_result = []
+            for x in dim:
+                for y in result:
+                    new_result.append(y+[x])
+            result = new_result
+    return result
+
+
+def make_full_space_df(substrates_csv, reagent_span, substrates_cols=['boronate/boronic ester smiles', 'bromide smiles', 'product_smiles']):
+    if type(reagent_span).__name__=='str':
+        with open(reagent_span, 'r') as f:
+            reagent_span = json.load(f)
+    if type(substrates_csv).__name__=='str':
+        substrate_csv = pd.read_csv(substrate_csv, sep=';')
+    
+    data = {}
+    conditions_names = list(reagent_span.keys())
+    conditions_space = unfold_conditions([reagent_span[x] for x in conditions_names])
+    logger.info('reagent span:\n' + '\n'.join('%s:%s'%(x,str(y)) for x,y in reagent_span.items()))
+    logger.info('reagent space size: %i'%len(conditions_space))
+
+    for _, row in substrates_csv.iterrows():
+        for cond in conditions_space:
+            for col in substrates_cols:
+                data[col] = data.get(col, []) + [row[col]]
+            for i, name in enumerate(conditions_names):
+                data[name] = data.get(name, []) + [cond[i]]
+    
+    data = pd.DataFrame(data)
+    return data
+
+
+def prepare_substrate_vect_dict():
+    mida, bromide = vectorize_unique_substrates()
+    logger.info('vectorization done')
+
+    mida_ranking, mida_counts = count_frequencies(mida[1])
+    bromide_ranking, bromide_counts = count_frequencies(bromide[1])
+    logger.info('counts done')
+    
+    logger.info('len mida= %i, len bromide= %i'%(len(mida_ranking), len(bromide_ranking)))
+
+    print('Mida top-10', [mida_counts[x] for x in mida_ranking[-10:]])
+    print('Mida bottom-10', [mida_counts[x] for x in mida_ranking[:10]])
+    print('Bromide top-10', [bromide_counts[x] for x in bromide_ranking[-10:]])
+    print('Bromide bottom-10', [bromide_counts[x] for x in bromide_ranking[:10]])
+
+    logger.info('vectorizing mida')
+    mida_vec = fgps_to_freq_vec(mida[1])[0]
+    const_cols = np.where(mida_vec.std(axis=0)==0)[0]
+    logger.info('constant columns: %i/%i'%(len(const_cols), mida_vec.shape[1]))
+    logger.info('actual vars: %i'%(-len(const_cols) + mida_vec.shape[1]))
+
+    logger.info('vectorizing bromide')
+    bromide_vec = fgps_to_freq_vec(bromide[1])[0]
+
+    bconst_cols = np.where(bromide_vec.std(axis=0)==0)[0]
+    logger.info('constant columns: %i/%i'%(len(bconst_cols), bromide_vec.shape[1]))
+    logger.info('actual vars: %i'%(-len(bconst_cols) + bromide_vec.shape[1]))
+    
+    bromide_dict = dict(zip(bromide[0], bromide_vec[:, bconst_cols]))
+    mida_dict = dict(zip(mida[0], mida_vec[:, const_cols]))
+    
+    return mida_dict, bromide_dict
+
+
+def dataframe_to_encoded_array(df, substrate_encoders, conditions_encoder, conditions_fields):
+    vectors = []
+    for field_name, encoder_dict in substrate_encoders:
+        vecs = [encoder_dict[m] for m in df[field_name].values]
+        vectors.append(vecs)
+    conditions = df[conditions_fields].values
+    vectors.append(conditions_encoder.transform(conditions))
+    vectors = np.hstack(vectors)
+    return vectors
+
+
 if __name__=='__main__':
     logger.setLevel(logging.INFO)
     h = logging.StreamHandler()
@@ -169,8 +265,21 @@ if __name__=='__main__':
     logger.info('Conditions:')
     enc = make_reagent_encoder()
     df, _ = load_spreadsheet()
+    logger.info('data: %i records'%df.shape[0])
     columns = ['ligand', 'solvent', 'base', 'temperature']
     x = enc.transform(df[columns])
     print(df[columns][:5])
     print(x[:5])
+
+    df2 = df[['boronate/boronic ester smiles', 'bromide smiles', 'product_smiles']].drop_duplicates()
+    logger.info('reagent_space: %i'%df2.shape[0])
+    df2 = make_full_space_df(df2, 'space_dict.json')
+    logger.info('full space: %i'%df2.shape[0])
+    total_dim = 1
+    for col in df2.columns:
+        un = df2[col].unique()
+        print(col, len(un), un)
+        if 'product' in col or not ('smiles' in col):
+            total_dim *= len(un)
+    logger.info('total dim: %i, %s'%(total_dim, total_dim==df2.shape[0]))
 

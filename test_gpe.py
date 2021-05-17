@@ -22,7 +22,6 @@ import gp_module
 import logging
 
 ######
-logging.basicConfig(level=logging.INFO, format='%(name)s:%(asctime)s- %(message)s')
 from sklearn.model_selection import train_test_split
 from vectorize import make_reagent_encoder, vectorize_unique_substrates, fgps_to_freq_vec
 from loading import load_spreadsheet
@@ -115,50 +114,51 @@ class GPensemble(GP):
         std = numpy.std(full, axis=0)
         return {'Ymean':mean, 'Ystd':std}
 
-
-mida_col = 'boronate/boronic ester smiles'
-bromide_col = 'bromide smiles'
-columns = ["base", "solvent", "ligand", "temperature"]
-data, status = load_spreadsheet()
-data = data[~data['yield'].isna()]
-logging.info('loaded with status %s, records=%i'%(status, data.shape[0]))
-
-mida, bromide = vectorize_unique_substrates()
-mida_vecs, _ = fgps_to_freq_vec(mida[1])
-bromide_vecs, _ = fgps_to_freq_vec(bromide[1])
-mida_translate = dict(zip(mida[0], mida_vecs))
-bromide_translate = dict(zip(bromide[0], bromide_vecs))
-logging.info('unique substeates vectorized')
-
-vectors_m = [mida_translate[m] for m in data[mida_col].values]
-vectors_b = [bromide_translate[m] for m in data[bromide_col].values]
-
-conditions_encoder = make_reagent_encoder(cols=columns)
-conditions = conditions_encoder.transform(data[columns].values)
-Y = data['yield'].values.reshape(-1,1)
-uY, sY = Y.mean(), Y.std()
-Y = (Y-uY)/sY
-#sY = 1
-
-X = np.hstack([vectors_m, vectors_b, conditions])
-non_zero_idx = np.where(X.std(axis=0)>0)[0]
-logging.info('non zero idx: %i/%i'%(len(non_zero_idx), X.shape[1]))
-X = X[:,non_zero_idx]
-logging.info('arrays assembled')
-
-#X = X.astype(np.float32)
-#Y = Y.astype(np.float32)
-Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=0.2)
-logging.info('train len: %i, test_len: %i'%(Xtrain.shape[0], Xtest.shape[0]))
-GPE = GPensemble(Xtrain, Ytrain) # predict returns {'Ymean':mean, 'Ystd':std}
-logging.info('prediction:')
-pred_train = GPE.predict(Xtrain)
-pred_test = GPE.predict(Xtest)
-
-mae_train = abs(pred_train['Ymean'] - Ytrain.reshape(-1)).mean()*sY
-unc_train = pred_train['Ystd'].mean()*sY
-logging.info('MAE train: %.3f UNC train: %.3f '%(mae_train, unc_train))
-
-mae_test = abs(pred_test['Ymean'] - Ytest.reshape(-1)).mean()*sY
-unc_test = pred_test['Ystd'].mean()*sY
-logging.info('MAE test: %.3f UNC test: %.3f '%(mae_test, unc_test))
+if __name__=='__main__':
+    logging.basicConfig(level=logging.INFO, format='%(name)s:%(asctime)s- %(message)s')
+    mida_col = 'boronate/boronic ester smiles'
+    bromide_col = 'bromide smiles'
+    columns = ["base", "solvent", "ligand", "temperature"]
+    data, status = load_spreadsheet()
+    data = data[~data['yield'].isna()]
+    logging.info('loaded with status %s, records=%i'%(status, data.shape[0]))
+    
+    mida, bromide = vectorize_unique_substrates()
+    mida_vecs, _ = fgps_to_freq_vec(mida[1])
+    bromide_vecs, _ = fgps_to_freq_vec(bromide[1])
+    mida_translate = dict(zip(mida[0], mida_vecs))
+    bromide_translate = dict(zip(bromide[0], bromide_vecs))
+    logging.info('unique substeates vectorized')
+    
+    vectors_m = [mida_translate[m] for m in data[mida_col].values]
+    vectors_b = [bromide_translate[m] for m in data[bromide_col].values]
+    
+    conditions_encoder = make_reagent_encoder(cols=columns)
+    conditions = conditions_encoder.transform(data[columns].values)
+    Y = data['yield'].values.reshape(-1,1)
+    uY, sY = Y.mean(), Y.std()
+    Y = (Y-uY)/sY
+    #sY = 1
+    
+    X = np.hstack([vectors_m, vectors_b, conditions])
+    non_zero_idx = np.where(X.std(axis=0)>0)[0]
+    logging.info('non zero idx: %i/%i'%(len(non_zero_idx), X.shape[1]))
+    X = X[:,non_zero_idx]
+    logging.info('arrays assembled')
+    
+    #X = X.astype(np.float32)
+    #Y = Y.astype(np.float32)
+    Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=0.2)
+    logging.info('train len: %i, test_len: %i'%(Xtrain.shape[0], Xtest.shape[0]))
+    GPE = GPensemble(Xtrain, Ytrain) # predict returns {'Ymean':mean, 'Ystd':std}
+    logging.info('prediction:')
+    pred_train = GPE.predict(Xtrain)
+    pred_test = GPE.predict(Xtest)
+    
+    mae_train = abs(pred_train['Ymean'] - Ytrain.reshape(-1)).mean()*sY
+    unc_train = pred_train['Ystd'].mean()*sY
+    logging.info('MAE train: %.3f UNC train: %.3f '%(mae_train, unc_train))
+    
+    mae_test = abs(pred_test['Ymean'] - Ytest.reshape(-1)).mean()*sY
+    unc_test = pred_test['Ystd'].mean()*sY
+    logging.info('MAE test: %.3f UNC test: %.3f '%(mae_test, unc_test))
