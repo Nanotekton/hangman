@@ -1,10 +1,19 @@
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--force', action='store_true')
+parser.add_argument('--update_gdrive', action='store_true')
+parser.add_argument('--num_models', type=int, default=100)
+args = parser.parse_args()
+
 import numpy as np
-from loading import cache, load_spreadsheet
+from loading import cache, cache_name, load_spreadsheet
 from vectorize import make_full_space_df, prepare_substrate_vect_dict, make_reagent_encoder, dataframe_to_encoded_array
 import logging
 from test_gpe import GPensemble
 import scipy
 import datetime
+import json
+from os import popen
 now = datetime.datetime.now().strftime('%Y-%b-%d-%H.%M.%S')
 #======================
 
@@ -24,12 +33,21 @@ def calc_probability_of_improvement(df, epsilon=0.01, group='condition_string'):
 
 #======================
 
-logging.basicConfig(level=logging.INFO, format='%(name)s:%(asctime)s-%(message)s')
+#logging.basicConfig(level=logging.INFO, format='%(name)s:%(asctime)s-%(message)s')
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+fh = logging.FileHandler(filename='prediction_%s.log'%now)
+sh = logging.StreamHandler()
+formatter = logging.Formatter('%(name)s:%(asctime)s-%(message)s')
+for H in [fh, sh]:
+        H.setLevel(logging.INFO)
+        H.setFormatter(formatter)
+        logger.addHandler(H)
 
 #1. load the shared data
 df, status = load_spreadsheet()
 df = df[~df['yield'].isna()]
+logger.info('input params: %s'%json.dumps(args.__dict__))
 logger.info('shared data status: %s'%status)
 logger.info('shared data records: %i'%df.shape[0])
 
@@ -73,15 +91,25 @@ logger.info('matrices done')
 
 #7. Train main model
 #TODO: add caching of weights 
-GPE = GPensemble(trainX, Y, numModels=3) #smaller ensemble for tests
+if cache['last_prediction']!='' and status=='unchanged' and not args.force:
+    logger.info('no sense to repeat, aborting')
+    exit(0)
+else:
+    logger.info('cached info: \n' + '\n'.join('%s:%s'%(x,y) for x,y in cache.items()))
+
+GPE = GPensemble(trainX, Y, numModels=args.num_models) #smaller ensemble for tests
+logger.info('trained')
 
 #8. Predict
 pred = GPE.predict(spaceX)
+logger.info('predicted')
+
 space_df['Ypred'] = pred['Ymean']*sY + uY
 space_df['Yunc'] = pred['Ystd']*sY
 
 #9. Sample. Strategy: 9 conds, 4 subs
 Ncond = 9
+Nbatch = 36
 calc_probability_of_improvement(space_df)
 not_seen = space_df[~space_df.training].reset_index()
 not_seen.sort_values(['PI', 'Yunc'], inplace=True, ascending=False)
@@ -90,17 +118,17 @@ new_conditions = list(not_seen.condition_string.unique())
 N_new_cond = len(new_conditions)
 N_new = not_seen.shape[0]
 
-if N_new<=36:
+if N_new<=Nbatch:
     logger.info('very last iteration')
     experiments = not_seen
 else:
     idx_to_take = []
     idx_pool = list(not_seen.index)
-    while(len(idx_to_take)<36):
+    while(len(idx_to_take)<Nbatch):
         to_remove = []
         for cond in new_conditions[:Ncond]:
-            view = not_seen.iloc[idx_pool]
-            if cond in view.condition_string:
+            view = not_seen.loc[idx_pool]
+            if cond in view.condition_string.values:
                 idx = view[view.condition_string==cond].index[0]
                 idx_to_take.append(idx)
                 idx_pool.remove(idx)
@@ -109,11 +137,21 @@ else:
         for cond in to_remove:
             new_conditions.remove(cond)
 
-    experiments = not_seen.iloc[idx_to_take]
+    experiments = not_seen.loc[idx_to_take]
 
 del experiments['condition_string']
+del experiments['Yvar']
+del experiments['training']
+
+experiments.sort_values(['PI','solvent','temperature','base','ligand','Yunc'], inplace=True, ascending=False)
 experiments.to_csv('prediction_%s.csv'%now, sep=';', index=False)
+logger.info('written')
 
+cache['last_prediction'] = 'prediction_%s.csv'%now
+with open(cache_name, 'w') as f: json.dump(cache, f)
 
-
+if args.update_gdrive:
+    print(popen('rclone prediction_%s.log remote:MADNESS/prediction_%s_files'%(now, now)).read())
+    print(popen('rclone dump_%s.csv remote:MADNESS/prediction_%s_files'%(cache['last_dump_time'], now)).read())
+    print(popen('rclone prediction_%s.csv remote:MADNESS'%(now)).read())
 
