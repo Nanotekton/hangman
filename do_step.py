@@ -47,9 +47,11 @@ for H in [fh, sh]:
 #1. load the shared data
 df, status = load_spreadsheet()
 df = df[~df['yield'].isna()]
+N = df.shape[0]
 logger.info('input params: %s'%json.dumps(args.__dict__))
 logger.info('shared data status: %s'%status)
 logger.info('shared data records: %i'%df.shape[0])
+
 
 #2. prepare space; reagents get from the shared file, conditions - current_space_dict.json
 substrates_cols = ['boronate/boronic ester smiles', 'bromide smiles', 'product_smiles']
@@ -145,13 +147,16 @@ del experiments['training']
 
 experiments.sort_values(['PI','solvent','temperature','base','ligand','Yunc'], inplace=True, ascending=False)
 experiments.to_csv('prediction_%s.csv'%now, sep=';', index=False)
+space_df.to_csv('prediction_full_space_%s.csv'%now, sep=';', index=False)
 logger.info('written')
 
 cache['last_prediction'] = 'prediction_%s.csv'%now
 with open(cache_name, 'w') as f: json.dump(cache, f)
 
 if args.update_gdrive:
-    print(popen('rclone prediction_%s.log remote:MADNESS/prediction_%s_files'%(now, now)).read())
-    print(popen('rclone dump_%s.csv remote:MADNESS/prediction_%s_files'%(cache['last_dump_time'], now)).read())
-    print(popen('rclone prediction_%s.csv remote:MADNESS'%(now)).read())
+    print(popen('rclone copy prediction_%s.log remote:MADNESS/prediction_%s_files'%(now, now)).read())
+    print(popen('rclone copy dump_%s.csv remote:MADNESS/prediction_%s_files'%(cache['last_dump_time'], now)).read())
+    print(popen('rclone copy omitted_%s.csv remote:MADNESS/prediction_%s_files'%(cache['last_dump_time'], now)).read())
+    print(popen('rclone copy prediction_full_space_%s.csv remote:MADNESS/prediction_%s_files'%(now, now)).read())
+    print(popen('rclone copy prediction_%s.csv remote:MADNESS'%(now)).read())
 
