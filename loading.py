@@ -57,9 +57,9 @@ def load_spreadsheet(url=shared_url, cache=cache, cache_name=cache_name):
     bad = data[~data.smiles_ok]
     data = data[data.smiles_ok].reset_index()
     logger.info('dropped records: %i/%i'%(bad.shape[0], N))
-    bad.to_csv('omitted_%s.csv'%now, sep=';', index=False)
+    bad.to_csv('omitted_%s.csv'%now, sep='	', index=False)
     
-    data.to_csv('dump_%s.csv'%now, sep=';', index=False)
+    data.to_csv('dump_%s.csv'%now, sep='	', index=False)
     current_hash = get_hash('dump_%s.csv'%now)
     previous_hash =  cache['last_dump_hash']
 

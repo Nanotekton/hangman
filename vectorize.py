@@ -200,19 +200,19 @@ def prepare_substrate_vect_dict():
 
     logger.info('vectorizing mida')
     mida_vec = fgps_to_freq_vec(mida[1])[0]
-    const_cols = np.where(mida_vec.std(axis=0)==0)[0]
-    logger.info('constant columns: %i/%i'%(len(const_cols), mida_vec.shape[1]))
-    logger.info('actual vars: %i'%(-len(const_cols) + mida_vec.shape[1]))
+    #const_cols = np.where(mida_vec.std(axis=0)==0)[0]
+    #logger.info('constant columns: %i/%i'%(len(const_cols), mida_vec.shape[1]))
+    #logger.info('actual vars: %i'%(-len(const_cols) + mida_vec.shape[1]))
 
     logger.info('vectorizing bromide')
     bromide_vec = fgps_to_freq_vec(bromide[1])[0]
 
-    bconst_cols = np.where(bromide_vec.std(axis=0)==0)[0]
-    logger.info('constant columns: %i/%i'%(len(bconst_cols), bromide_vec.shape[1]))
-    logger.info('actual vars: %i'%(-len(bconst_cols) + bromide_vec.shape[1]))
+    #bconst_cols = np.where(bromide_vec.std(axis=0)==0)[0]
+    #logger.info('constant columns: %i/%i'%(len(bconst_cols), bromide_vec.shape[1]))
+    #logger.info('actual vars: %i'%(-len(bconst_cols) + bromide_vec.shape[1]))
     
-    bromide_dict = dict(zip(bromide[0], bromide_vec[:, bconst_cols]))
-    mida_dict = dict(zip(mida[0], mida_vec[:, const_cols]))
+    bromide_dict = dict(zip(bromide[0], bromide_vec))#[:, bconst_cols]))
+    mida_dict = dict(zip(mida[0], mida_vec))#[:, const_cols]))
     
     return mida_dict, bromide_dict
 

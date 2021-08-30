@@ -86,7 +86,42 @@ class GPensemble(GP):
         print("INPUT DIM", inputDim)
         #old: l2=0.001, dropout=0.3 batch_size=32 hidden_n=56
         dropOut = 0.845918563446334
-        self.config = {'kernel_base': 'matern32', 'model_kind': 'vgp', 'mean_NN': False, 'noise':0.01, 'kernel_NN':True, 'dot_rbf': False, 'num_inducing_points': None,
+        self.config = {'kernel_base': 'matern32', 'model_kind': 'vgp', 
+                'mean_NN': False, 'noise':0.01, 'kernel_NN':True, 'dot_rbf': False, 'num_inducing_points': None,
+        #self.config = {'kernel_base': 'matern32', 'model_kind': 'gp', 'mean_NN': False, 'noise':0.01, 'kernel_NN':False, 'dot_rbf': False, 'num_inducing_points': None,
+                'kernel_cfg':{'embedding':100, 'l2':0.05, 'dropout':dropOut, 'batch_size':128, 'hidden_n':200, 'hidden_l':1, 'output_dim':10, 'input_dim':(inputDim,), 
+                              'output_act':'relu', 'input_act':'relu', 'input_bias':True},
+                'train_cfg':{ 'iter_mean': None, 'iter': 10, 'iter_internal': 5, 'iter_post': 5}}
+        self.models = []
+        self.init_weight_list = []
+        for i in range(numModels):
+            model, weight = self.trainModel(Xtrain, Ytrain)
+            self.models.append(model)
+            self.init_weight_list.append(weight)
+            if (i+1)%10==0:
+                logging.info('model done: %i/%i'%(i,numModels))
+
+    def predict(self, fullX, numSamples=100):
+        #evaluate status
+        samples = []
+        for model in self.models:
+            predYsamples = model.predict_f_samples(fullX, num_samples=numSamples)
+            YpredSamples = predYsamples.numpy()
+            YpredSamples = numpy.reshape( YpredSamples, YpredSamples.shape[0:2] )
+            #print(YpredSamples.shape)
+            samples.append(YpredSamples)
+        full = numpy.concatenate( samples)
+        mean = numpy.mean(full, axis=0)
+        std = numpy.std(full, axis=0)
+        return {'Ymean':mean, 'Ystd':std}
+
+class plainGP(GP):
+    def __init__(self, Xtrain, Ytrain, numModels=1, kind='gp'):
+        inputDim = Xtrain.shape[1]
+        print("INPUT DIM", inputDim)
+        #old: l2=0.001, dropout=0.3 batch_size=32 hidden_n=56
+        dropOut = 0.845918563446334
+        self.config = {'kernel_base': 'matern32', 'model_kind': kind, 'mean_NN': False, 'noise':0.01, 'kernel_NN':False, 'dot_rbf': False, 'num_inducing_points': None,
         #self.config = {'kernel_base': 'matern32', 'model_kind': 'gp', 'mean_NN': False, 'noise':0.01, 'kernel_NN':False, 'dot_rbf': False, 'num_inducing_points': None,
                 'kernel_cfg':{'embedding':100, 'l2':0.05, 'dropout':dropOut, 'batch_size':128, 'hidden_n':200, 'hidden_l':1, 'output_dim':10, 'input_dim':(inputDim,), 
                               'output_act':'relu', 'input_act':'relu', 'input_bias':True},
@@ -115,6 +150,13 @@ class GPensemble(GP):
         return {'Ymean':mean, 'Ystd':std}
 
 if __name__=='__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, choices=['GPE','plainGP'])
+    parser.add_argument('--reversed', action='store_true')
+    parser.add_argument('--kind', type=str, choices=['gp', 'vgp'], default='gp')
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO, format='%(name)s:%(asctime)s- %(message)s')
     mida_col = 'boronate/boronic ester smiles'
     bromide_col = 'bromide smiles'
@@ -148,9 +190,20 @@ if __name__=='__main__':
     
     #X = X.astype(np.float32)
     #Y = Y.astype(np.float32)
-    Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=0.2)
+    if args.reversed:
+        tsize=0.8
+    else:
+        tsize=0.2
+    Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=tsize)
     logging.info('train len: %i, test_len: %i'%(Xtrain.shape[0], Xtest.shape[0]))
-    GPE = GPensemble(Xtrain, Ytrain) # predict returns {'Ymean':mean, 'Ystd':std}
+
+    if args.model=='GPE':
+        GPE = GPensemble(Xtrain, Ytrain) # predict returns {'Ymean':mean, 'Ystd':std}
+    elif args.model=='plainGP':
+        GPE = plainGP(Xtrain, Ytrain)
+    else:
+        raise ValueError('unknown model:%s'%args.model)
+
     logging.info('prediction:')
     pred_train = GPE.predict(Xtrain)
     pred_test = GPE.predict(Xtest)
